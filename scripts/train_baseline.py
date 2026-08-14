@@ -22,7 +22,7 @@ Pipeline:
      logging per-epoch mean total loss + per-component means.
   4. Run inference (model.eval()) on the full val split, threshold predictions
      (score > SCORE_THRESH, per-pixel mask prob > MASK_THRESH), and score against
-     GT with compute_panoptic_quality_dataset / compute_dice_dataset
+     GT with compute_panoptic_quality / compute_dice_per_image at each threshold
      (src/eval/metrics.py).
   5. Save a checkpoint to checkpoints/baseline_v1.pt containing the model
      state_dict plus the architecture config needed to rebuild it
@@ -61,7 +61,7 @@ from src.data.coco_dataset import (
     collate_fn,
     get_grouped_split,
 )
-from src.eval.metrics import compute_dice_dataset, compute_panoptic_quality_dataset
+from src.eval.metrics import compute_dice_per_image, compute_panoptic_quality
 from src.models.baseline import build_model
 
 # --------------------------------------------------------------------------- #
@@ -77,11 +77,9 @@ CHECKPOINT_PATH = REPO_ROOT / "checkpoints" / "baseline_v1.pt"
 SEED = 0
 VAL_FRACTION = 0.15
 
-# --- deliberate baseline-v1 scope limits (see module docstring) ---
-TRAIN_SUBSET_SIZE = 250  # None -> use the full grouped train split for a real run
-EPOCHS = 8  # measured ~0.6s/step steady-state on the target GPU at batch_size=2 ->
-            # ~125 steps/epoch * 0.6s ~= 75s/epoch -> ~10min total train time for 8
-            # epochs, leaving room under the 10-20min budget for full-val-split eval
+# --- Phase 0.2: full-data run (baseline-v1 used TRAIN_SUBSET_SIZE=250, EPOCHS=8) ---
+TRAIN_SUBSET_SIZE = None  # full grouped train split (979 entries)
+EPOCHS = 16  # ~490 steps/epoch at bs2 on full data, ~0.5s/step -> ~65-75 min total
 
 BATCH_SIZE = 2
 NUM_WORKERS = 0  # Windows-safe default; pycocotools polygon rasterization is the
@@ -94,7 +92,9 @@ GRAD_CLIP_NORM = 10.0  # basic stability guard, not tuned
 MIN_SIZE = 800
 MAX_SIZE = 1024
 
-SCORE_THRESH = 0.5  # per-instance confidence filter (documented choice, per task brief)
+# Eval sweeps the score threshold and the checkpoint stores the best one by val PQ
+# (baseline-v1 measured 0.75 as optimal: PQ 0.319 @ 0.5 -> 0.343 @ 0.75).
+SCORE_THRESHOLDS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9]
 MASK_THRESH = 0.5   # per-pixel probability -> binary mask threshold (standard Mask R-CNN convention)
 
 LOG_EVERY = 20  # print a running-loss line every N training steps
@@ -115,7 +115,7 @@ def _to_device(images, targets, device):
     return images, targets
 
 
-def train_one_epoch(model, loader, optimizer, device, epoch_idx):
+def train_one_epoch(model, loader, optimizer, device, epoch_idx, scheduler=None):
     model.train()
     component_sums = {}
     total_sum = 0.0
@@ -132,6 +132,9 @@ def train_one_epoch(model, loader, optimizer, device, epoch_idx):
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
         optimizer.step()
+
+        if scheduler is not None:
+            scheduler.step()
 
         loss_val = float(total_loss.item())
         total_sum += loss_val
@@ -154,15 +157,17 @@ def train_one_epoch(model, loader, optimizer, device, epoch_idx):
 
 
 @torch.no_grad()
-def evaluate(model, loader, device):
-    """Run inference on every image in `loader`, threshold predictions, and
-    return (gt_masks_per_image, pred_masks_per_image) in matching order, ready
-    to hand to compute_panoptic_quality_dataset / compute_dice_dataset."""
+def evaluate_multi_threshold(model, loader, device, score_thresholds):
+    """Run inference once, then score PQ/Dice at every score threshold in
+    `score_thresholds` (one sweep for the price of one inference pass).
+
+    Per-image metrics are computed incrementally so full-resolution masks for
+    the whole val set never need to be held in memory at once. Returns
+    {threshold: {"pq_per_image": [...], "dice_per_image": [...], "n_kept": int}}.
+    """
     model.eval()
-    gt_masks_per_image = []
-    pred_masks_per_image = []
+    results = {t: {"pq_per_image": [], "dice_per_image": [], "n_kept": 0} for t in score_thresholds}
     n_images = 0
-    n_pred_instances = 0
 
     for images, targets in loader:
         images_dev = [img.to(device) for img in images]
@@ -170,21 +175,40 @@ def evaluate(model, loader, device):
 
         for target, pred in zip(targets, preds):
             gt_masks = [m.numpy().astype(np.uint8) for m in target["masks"]]
-
-            keep = pred["scores"] > SCORE_THRESH
-            kept_masks = pred["masks"][keep]  # (K, 1, H, W) soft masks, already at native res
-            pred_masks = [
-                (m[0].cpu().numpy() > MASK_THRESH).astype(np.uint8) for m in kept_masks
+            scores = pred["scores"].cpu().numpy()
+            bin_masks = [
+                (m[0].cpu().numpy() > MASK_THRESH).astype(np.uint8) for m in pred["masks"]
             ]
 
-            gt_masks_per_image.append(gt_masks)
-            pred_masks_per_image.append(pred_masks)
+            for t in score_thresholds:
+                kept = [m for m, s in zip(bin_masks, scores) if s > t]
+                results[t]["n_kept"] += len(kept)
+                results[t]["pq_per_image"].append(compute_panoptic_quality(gt_masks, kept))
+                results[t]["dice_per_image"].append(compute_dice_per_image(gt_masks, kept))
             n_images += 1
-            n_pred_instances += len(pred_masks)
 
-    print(f"  evaluated {n_images} val images, {n_pred_instances} total predicted instances "
-          f"(score>{SCORE_THRESH}) kept")
-    return gt_masks_per_image, pred_masks_per_image
+    print(f"  evaluated {n_images} val images at {len(score_thresholds)} score thresholds")
+    return results
+
+
+def summarize_threshold_results(results):
+    """Aggregate evaluate_multi_threshold output into per-threshold means and
+    pick the best threshold by mean PQ."""
+    summary = {}
+    for t, r in results.items():
+        pq_list = r["pq_per_image"]
+        summary[t] = {
+            "pq": float(np.mean([x["pq"] for x in pq_list])),
+            "sq": float(np.mean([x["sq"] for x in pq_list])),
+            "rq": float(np.mean([x["rq"] for x in pq_list])),
+            "dice": float(np.mean(r["dice_per_image"])),
+            "tp": int(sum(x["tp"] for x in pq_list)),
+            "fp": int(sum(x["fp"] for x in pq_list)),
+            "fn": int(sum(x["fn"] for x in pq_list)),
+            "n_kept": r["n_kept"],
+        }
+    best_t = max(summary, key=lambda t: summary[t]["pq"])
+    return summary, best_t
 
 
 def main():
@@ -228,6 +252,10 @@ def main():
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad], lr=LR, weight_decay=WEIGHT_DECAY
     )
+    # Cosine decay LR 1e-4 -> 1e-6 over the whole run, stepped per iteration.
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=EPOCHS * len(train_loader), eta_min=1e-6
+    )
 
     # ---- train ----
     print(f"\n=== training: {EPOCHS} epochs, batch_size={BATCH_SIZE}, "
@@ -235,51 +263,60 @@ def main():
     history = []
     train_t0 = time.time()
     for epoch in range(1, EPOCHS + 1):
-        mean_total, mean_components, epoch_time = train_one_epoch(model, train_loader, optimizer, device, epoch)
+        mean_total, mean_components, epoch_time = train_one_epoch(
+            model, train_loader, optimizer, device, epoch, scheduler=scheduler
+        )
         history.append({"epoch": epoch, "mean_total_loss": mean_total, **mean_components, "epoch_time_s": epoch_time})
         comp_str = " ".join(f"{k}={v:.4f}" for k, v in mean_components.items())
         print(f"[epoch {epoch}/{EPOCHS}] mean_total_loss={mean_total:.4f} ({comp_str}) time={epoch_time:.1f}s")
     train_total_time = time.time() - train_t0
     print(f"\ntotal training wall-clock: {train_total_time:.1f}s ({train_total_time / 60:.1f} min)")
 
-    # ---- checkpoint ----
+    # ---- checkpoint (saved before eval for crash-safety; best threshold added after) ----
     CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "num_classes": 2,
-            "min_size": MIN_SIZE,
-            "max_size": MAX_SIZE,
-            "score_thresh": SCORE_THRESH,
-            "mask_thresh": MASK_THRESH,
-            "train_subset_size": TRAIN_SUBSET_SIZE,
-            "epochs": EPOCHS,
-            "history": history,
-        },
-        CHECKPOINT_PATH,
-    )
+    ckpt = {
+        "model_state_dict": model.state_dict(),
+        "num_classes": 2,
+        "min_size": MIN_SIZE,
+        "max_size": MAX_SIZE,
+        "score_thresh": 0.75,  # provisional; replaced by the sweep's best below
+        "mask_thresh": MASK_THRESH,
+        "train_subset_size": TRAIN_SUBSET_SIZE,
+        "epochs": EPOCHS,
+        "history": history,
+    }
+    torch.save(ckpt, CHECKPOINT_PATH)
     print(f"saved checkpoint: {CHECKPOINT_PATH}")
 
-    # ---- evaluate on full val split ----
-    print(f"\n=== evaluating on full val split ({len(val_ds)} images) ===")
+    # ---- evaluate on full val split, sweeping the score threshold ----
+    print(f"\n=== evaluating on full val split ({len(val_ds)} images), "
+          f"thresholds={SCORE_THRESHOLDS} ===")
     eval_t0 = time.time()
-    gt_masks_per_image, pred_masks_per_image = evaluate(model, val_loader, device)
+    results = evaluate_multi_threshold(model, val_loader, device, SCORE_THRESHOLDS)
     eval_time = time.time() - eval_t0
     print(f"eval wall-clock: {eval_time:.1f}s ({eval_time / 60:.1f} min)")
 
-    pq_result = compute_panoptic_quality_dataset(gt_masks_per_image, pred_masks_per_image)
-    dice_result = compute_dice_dataset(gt_masks_per_image, pred_masks_per_image)
+    summary, best_t = summarize_threshold_results(results)
+    print("\n=== THRESHOLD SWEEP (full val split) ===")
+    for t in SCORE_THRESHOLDS:
+        s = summary[t]
+        marker = "  <-- best" if t == best_t else ""
+        print(f"  thr={t:.2f}: PQ={s['pq']:.4f} SQ={s['sq']:.4f} RQ={s['rq']:.4f} "
+              f"Dice={s['dice']:.4f} TP={s['tp']} FP={s['fp']} FN={s['fn']}{marker}")
 
-    print("\n=== FINAL VALIDATION METRICS (baseline_v1) ===")
-    print(f"  PQ   = {pq_result['pq']:.4f}")
-    print(f"  SQ   = {pq_result['sq']:.4f}")
-    print(f"  RQ   = {pq_result['rq']:.4f}")
-    print(f"  Dice = {dice_result:.4f}")
+    best = summary[best_t]
+    print(f"\n=== FINAL VALIDATION METRICS (score_thresh={best_t}) ===")
+    print(f"  PQ   = {best['pq']:.4f}")
+    print(f"  SQ   = {best['sq']:.4f}")
+    print(f"  RQ   = {best['rq']:.4f}")
+    print(f"  Dice = {best['dice']:.4f}")
+    print(f"  (aggregate: TP={best['tp']} FP={best['fp']} FN={best['fn']})")
 
-    total_tp = sum(r["tp"] for r in pq_result["per_image"])
-    total_fp = sum(r["fp"] for r in pq_result["per_image"])
-    total_fn = sum(r["fn"] for r in pq_result["per_image"])
-    print(f"  (aggregate over val set: TP={total_tp} FP={total_fp} FN={total_fn})")
+    # bake the winning threshold + sweep results into the checkpoint
+    ckpt["score_thresh"] = float(best_t)
+    ckpt["threshold_sweep"] = {str(t): summary[t] for t in SCORE_THRESHOLDS}
+    torch.save(ckpt, CHECKPOINT_PATH)
+    print(f"updated checkpoint with best score_thresh={best_t}: {CHECKPOINT_PATH}")
 
 
 if __name__ == "__main__":

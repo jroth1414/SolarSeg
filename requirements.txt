@@ -4,6 +4,8 @@ pillow
 opencv-python
 pycocotools
 torchmetrics
+segmentation-models-pytorch
+timm
 matplotlib
 tqdm
 kagglehub
