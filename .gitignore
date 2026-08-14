@@ -20,6 +20,9 @@ venv/
 # Secrets
 .env
 
+# Claude Code local project config
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
