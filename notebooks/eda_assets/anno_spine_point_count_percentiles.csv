@@ -1,0 +1,16 @@
+percentile,num_spine_points_when_present
+0,2.0
+1,2.0
+5,3.0
+10,4.0
+25,7.0
+50,10.0
+75,16.0
+90,23.0
+95,29.0
+99,45.0
+100,122.0
+n_missing_key,0.0
+n_present_key_but_empty,0.0
+n_populated_gt0,8199.0
+n_total_annotations,8199.0

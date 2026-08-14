@@ -1,0 +1,1 @@
+file_name,split,is_train,is_test,width,height,mode,n_channels,file_size_bytes,px_mean,px_std,px_min,px_max,filename_parse_ok,capture_datetime,capture_date,instrument_code,is_expected_dim,is_expected_mode

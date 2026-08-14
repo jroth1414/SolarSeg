@@ -1,0 +1,23 @@
+# Data (download manually per data/README.md — 750MB+, not for git)
+data/MAGFiLO_1.0_Kaggle_2026/
+data/*.zip
+
+# Generated submissions / model artifacts
+submissions/*.csv
+*.pt
+*.pth
+*.ckpt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Secrets
+.env
+
+# OS
+.DS_Store
+Thumbs.db

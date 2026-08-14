@@ -1,0 +1,29 @@
+=== xref_audit.py SUMMARY ===
+images[] entries: 1154 | unique file_name values: 707 | annotations[]: 8199
+licenses field python type: dict ; raw value: {'url': 'https://gong.nso.edu/', 'id': 1, 'name': 'NSO/GONG'}
+license id values referenced by images[] not resolvable: {}
+missing files on disk (file_name in JSON, absent in train_images/): 0
+files on disk never referenced by any images[] entry: 0
+images[] id-prefix pattern malformed: 0
+images[] id-suffix != file_name stem mismatches: 0
+orphaned annotations (image_id not in images[].id): 0
+images[] entries with 0 annotations: 0
+99th percentile annotations-per-image: 19.0
+images[] entries above 99th percentile: 7
+JSON files found under test/ tree (expect 0): 0
+other candidate annotation-like files under test/: 0
+train/test filename overlap: 0
+dimension mismatches (JSON vs actual JPEG): 0
+files with actual dims != 2048x2048: 0
+iscrowd value distribution: {0: 8199}
+annotations with missing/empty spine: 0 / 8199
+annotations with segmentation != 1 polygon: 0
+annotations with unclosed segmentation ring (any nonzero gap): 8199 / 8199 (100.0%) -- prompt's assumed x0==x_n-1,y0==y_n-1 invariant is FALSE in practice
+  of those: gap<=0.01px(float noise)=1580, 0.01-1.0px(subpixel)=3130, >1.0px(real gap)=3489 (42.6%)
+  gap_px: min=0.0002 max=31.33 mean=1.40 median=0.985
+malformed/null/missing field rows (images): 0
+malformed/null/missing field rows (annotations): 0
+multi-batch base images: 296 / 707
+batch-pairs IoU computed: 598
+batch-pairs IoU median: 0.471512706715447
+total flagged rows: 3854

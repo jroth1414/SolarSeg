@@ -1,0 +1,3 @@
+split,n,n_2048x2048,n_mode_L,n_filename_parsed,unique_widths,unique_heights,unique_modes
+test,180,180,180,180,[2048],[2048],['L']
+train,707,707,707,707,[2048],[2048],['L']

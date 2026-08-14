@@ -1,0 +1,16 @@
+percentile,filaments_per_image
+0,1.0
+1,1.0
+5,1.0
+10,2.0
+25,4.0
+50,7.0
+75,10.0
+90,13.0
+95,15.0
+99,19.0
+100,26.0
+mean,7.104852686308492
+std,4.37361642643054
+n_images_zero_annotations,0.0
+n_images_total,1154.0

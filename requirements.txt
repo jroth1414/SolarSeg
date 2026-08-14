@@ -1,0 +1,12 @@
+numpy
+pandas
+pillow
+opencv-python
+pycocotools
+torch
+torchvision
+torchmetrics
+matplotlib
+tqdm
+kagglehub
+python-dotenv

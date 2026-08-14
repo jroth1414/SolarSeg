@@ -1,0 +1,5 @@
+category_id,category_name,supercategory,count,pct
+1,Left,filament,2535,30.918404683497986
+2,Right,filament,2590,31.58921819734114
+3,Unidentifiable,filament,3074,37.49237711916087
+4,Ambiguous,filament,0,0.0
