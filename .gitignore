@@ -4,6 +4,8 @@ data/*.zip
 
 # Generated submissions / model artifacts
 submissions/*.csv
+checkpoints/
+logs/
 *.pt
 *.pth
 *.ckpt
