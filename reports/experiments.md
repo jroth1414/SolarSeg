@@ -28,6 +28,11 @@ Reference points (measured on real data, see plan):
 | 9 | TTA-maps pp re-sweep | 40-config grid on flip-averaged maps | 0.4193 | — | — | — | — | Optimum unchanged (thr 0.55 / 400 / closing) — pp config is stable |
 | 10 | hysteresis growing | seed thr 0.55, grow ∈ {0.25…0.50}, no-merge guard | 0.4188 @ best | — | — | — | — | **Refuted**: monotonically worse; growing degrades the 876 TPs more than it recovers the 99 near-misses. Post-processing maxed out |
 
+| 11 | 5-fold CV (unet_f0..f4) | 60 ep each, grouped kfold seed 0; per-fold TTA PQ 0.4026–0.4306 | — | — | — | — | — | Fold spread ±0.015 calibrates val noise floor (~0.01) |
+| 12 | OOF stitched (TTA + tuned pp) | all 1154 entries, each scored by its held-out fold | **0.4221** | 0.6553 | 0.6206 | — | 5201/3285/2998 | Robust recipe estimate; test-time 5-model ensemble expected ≥ this |
+
+Final submission candidates: `unet_5fold_tta.csv` (ensemble, primary) and `unet_v2_tta.csv` (single model, 0.4193 fixed-split val).
+
 ### Error taxonomy (unet_v2 + TTA, thr 0.55/400/closing) — feeds report rubric
 
 FN side (511): pure_miss 268 (52%), partial_undercover 108 (21%), near_miss 99 (19%, mean best-IoU 0.454), fragmented 36 (7%).

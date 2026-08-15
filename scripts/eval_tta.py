@@ -65,6 +65,9 @@ def main():
     ap.add_argument("--threshold", type=float, default=None)
     ap.add_argument("--min-area", type=int, default=None)
     ap.add_argument("--closing", action="store_true")
+    ap.add_argument("--kfold", type=int, default=None,
+                    help="evaluate on get_grouped_kfold(k, fold) val split instead of the fixed split")
+    ap.add_argument("--fold", type=int, default=0)
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -78,7 +81,11 @@ def main():
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
 
-    _train_ids, val_ids = get_grouped_split(JSON_PATH, val_fraction=0.15, seed=0)
+    if args.kfold:
+        from src.data.coco_dataset import get_grouped_kfold
+        _train_ids, val_ids = get_grouped_kfold(JSON_PATH, k=args.kfold, fold=args.fold, seed=0)
+    else:
+        _train_ids, val_ids = get_grouped_split(JSON_PATH, val_fraction=0.15, seed=0)
     val_ds = SemanticFilamentDataset(JSON_PATH, IMAGES_DIR, image_ids=val_ids, train=False)
     entries_by_id = {e["id"]: e for e in val_ds.entries}
     val_loader = DataLoader(val_ds, batch_size=1, shuffle=False, num_workers=0,
