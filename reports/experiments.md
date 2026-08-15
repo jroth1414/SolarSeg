@@ -15,8 +15,11 @@ Reference points (measured on real data, see plan):
 |---|-----------|--------|--------|----|----|------|----------|----------|
 | 1 | baseline_v1 | Mask R-CNN R50v2, 250/979 entries, 8 ep, 1024px, thr 0.5 | 0.3205 | 0.6127 | 0.5048 | 0.6165 | 850/1250/537 | FP-heavy; sweep threshold |
 | 2 | baseline_v1 + thr sweep | same checkpoint, score_thresh 0.75 | 0.343 | — | — | — | — | +0.024 free; adopt sweep in all future evals |
-| 3 | maskrcnn_full_v2 | full 979 entries, 16 ep, cosine 1e-4→1e-6, sweep 0.5–0.9 | *(running)* | | | | | Phase-0 bar for the U-Net fork |
-| 4 | unet_v1 | SMP U-Net eff-b3, 1024² fg-biased crops, BCE+Dice, AMP, 40 ep, CC+min_area 200 | *(pending)* | | | | | Gate: beats #3 by +0.02 → U-Net primary |
+| 3 | maskrcnn_full_v2 | full 979 entries, 16 ep, cosine 1e-4→1e-6, best thr 0.80 | 0.3869 | 0.6279 | 0.5902 | 0.6457 | 835/598/552 | Phase-0 bar set: U-Net gate = 0.407. Loss 0.96→0.53; sweep plateau 0.75–0.85 |
+| 4 | unet_v1 | SMP U-Net eff-b3, 1024² fg-biased crops, BCE+Dice, AMP, 40 ep, naive pp (0.5/200) | 0.3966 | 0.6507 | 0.5870 | 0.6798 | 938/856/449 | Beats #3 pre-sweep; val PQ still rising at ep40 → extend |
+| 5 | unet_v2 | warm-restart from #4, +40 ep @ 1e-4 cosine, naive pp | 0.4015 | 0.6491 | 0.5963 | 0.6754 | 928/782/459 | Best @ ep25, then flat — length lever exhausted. Sweep pending |
+| 5b | unet_v1 + pp sweep | thr 0.50, min_area 400, closing=True (294-config grid) | 0.4065 | — | — | — | — | +0.010 over naive; min_mean_prob axis dead; min_area 400 ≫ GT floor 200 → small CCs are FPs |
+| 6 | unet_b5 | eff-b5 encoder from scratch, 40 ep (encoder ladder) | *(running)* | | | | | Gate: +0.01 over b3 line |
 
 ## Notes
 

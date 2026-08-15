@@ -30,10 +30,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 JSON_PATH = (REPO_ROOT / "data" / "MAGFiLO_1.0_Kaggle_2026" / "train"
              / "MAGFiLO_1.0_Annotations_kaggle2026_train.json")
 
-THRESHOLDS = [0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65]
-MIN_AREAS = [50, 100, 150, 200, 250, 300, 400]
+# Trimmed grid informed by the first full sweep on unet_v1 (294 configs, 3.9h):
+# min_mean_prob had ZERO effect at any value (surviving components are all
+# high-confidence) so that axis is dropped; the optimum sat at thr 0.45-0.50 /
+# min_area 300-400 with closing=True marginally ahead, so the grid centers there
+# and extends the min_area direction that was still improving at the old edge.
+THRESHOLDS = [0.40, 0.45, 0.50, 0.55]
+MIN_AREAS = [200, 300, 400, 500, 600]
 CLOSINGS = [False, True]
-MIN_MEAN_PROBS = [0.0, 0.55, 0.65]
+MIN_MEAN_PROBS = [0.0]
 
 
 def main():

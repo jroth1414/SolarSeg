@@ -18,6 +18,7 @@ checkpoints/unet_v1_valprobs/ for scripts/sweep_postproc.py.
 
 from __future__ import annotations
 
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -42,21 +43,19 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = REPO_ROOT / "data" / "MAGFiLO_1.0_Kaggle_2026"
 JSON_PATH = DATA_ROOT / "train" / "MAGFiLO_1.0_Annotations_kaggle2026_train.json"
 IMAGES_DIR = DATA_ROOT / "train" / "train_images"
-CHECKPOINT_PATH = REPO_ROOT / "checkpoints" / "unet_v1.pt"
-VALPROBS_DIR = REPO_ROOT / "checkpoints" / "unet_v1_valprobs"
 
 SEED = 0
 VAL_FRACTION = 0.15
 
-ENCODER = "efficientnet-b3"
 CROP_SIZE = 1024
 FG_BIAS = 0.7
-EPOCHS = 40
-BATCH_SIZE = 4
 NUM_WORKERS = 4
-LR = 2e-4
 WEIGHT_DECAY = 1e-4
 EVAL_EVERY = 5  # epochs between full-res val evaluations (plus a final one)
+
+# defaults, overridable via CLI (see parse_args): fresh 40-epoch run at 2e-4
+DEFAULT_EPOCHS = 40
+DEFAULT_LR = 2e-4
 
 # submission-path post-processing defaults used for in-training val scoring;
 # scripts/sweep_postproc.py refines these on the cached probability maps
@@ -131,7 +130,26 @@ def entry_instance_masks(entry):
     return out
 
 
+def parse_args():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
+    ap.add_argument("--lr", type=float, default=DEFAULT_LR)
+    ap.add_argument("--encoder", default="efficientnet-b3")
+    ap.add_argument("--batch-size", type=int, default=4)
+    ap.add_argument("--init-from", default=None,
+                    help="checkpoint to warm-start weights from (fresh optimizer/cosine cycle)")
+    ap.add_argument("--run-name", default="unet_v1",
+                    help="checkpoint saved to checkpoints/<run-name>.pt, prob maps to "
+                         "checkpoints/<run-name>_valprobs/")
+    return ap.parse_args()
+
+
 def main():
+    args = parse_args()
+    checkpoint_path = REPO_ROOT / "checkpoints" / f"{args.run_name}.pt"
+    valprobs_dir = REPO_ROOT / "checkpoints" / f"{args.run_name}_valprobs"
+    epochs, lr = args.epochs, args.lr
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"device: {device}")
     if device.type == "cuda":
@@ -153,7 +171,7 @@ def main():
     val_ds.entries_by_id = {e["id"]: e for e in val_ds.entries}
 
     train_loader = DataLoader(
-        train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS,
+        train_ds, batch_size=args.batch_size, shuffle=True, num_workers=NUM_WORKERS,
         collate_fn=semantic_collate, pin_memory=True,
         persistent_workers=NUM_WORKERS > 0, drop_last=True,
     )
@@ -161,24 +179,30 @@ def main():
         val_ds, batch_size=1, shuffle=False, num_workers=0, collate_fn=semantic_collate,
     )
 
-    model = build_unet(encoder_name=ENCODER).to(device)
+    model = build_unet(encoder_name=args.encoder).to(device)
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"model: U-Net {ENCODER}, {n_params / 1e6:.1f}M params")
+    print(f"model: U-Net {args.encoder}, {n_params / 1e6:.1f}M params")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    if args.init_from:
+        init_ckpt = torch.load(args.init_from, map_location=device, weights_only=False)
+        model.load_state_dict(init_ckpt["model_state_dict"])
+        print(f"warm-started weights from {args.init_from} "
+              f"(epoch {init_ckpt.get('epoch')}, val_pq {init_ckpt.get('val_pq', float('nan')):.4f})")
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=EPOCHS * len(train_loader), eta_min=1e-6
+        optimizer, T_max=epochs * len(train_loader), eta_min=1e-6
     )
     scaler = torch.amp.GradScaler(enabled=device.type == "cuda")
     bce_fn = torch.nn.BCEWithLogitsLoss()
 
     best_pq = -1.0
     history = []
-    CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n=== training: {EPOCHS} epochs, bs={BATCH_SIZE}, {len(train_loader)} steps/epoch, "
-          f"crop {CROP_SIZE}^2, AdamW lr={LR} cosine ===")
-    for epoch in range(1, EPOCHS + 1):
+    print(f"\n=== training: {epochs} epochs, bs={args.batch_size}, {len(train_loader)} steps/epoch, "
+          f"crop {CROP_SIZE}^2, AdamW lr={lr} cosine ===")
+    for epoch in range(1, epochs + 1):
         model.train()
         t0 = time.time()
         loss_sum = bce_sum = dice_sum = 0.0
@@ -213,12 +237,12 @@ def main():
         row = {"epoch": epoch, "loss": loss_sum / n_steps, "bce": bce_sum / n_steps,
                "dice_loss": dice_sum / n_steps, "epoch_time_s": epoch_time}
 
-        if epoch % EVAL_EVERY == 0 or epoch == EPOCHS:
+        if epoch % EVAL_EVERY == 0 or epoch == epochs:
             ev_t0 = time.time()
             pq, dice = evaluate(model, val_loader, device, save_probs_dir=None)
             row.update({"val_pq": pq["pq"], "val_sq": pq["sq"], "val_rq": pq["rq"],
                         "val_dice": dice})
-            print(f"[epoch {epoch}/{EPOCHS}] loss={row['loss']:.4f} | "
+            print(f"[epoch {epoch}/{epochs}] loss={row['loss']:.4f} | "
                   f"val PQ={pq['pq']:.4f} SQ={pq['sq']:.4f} RQ={pq['rq']:.4f} "
                   f"Dice={dice:.4f} (TP={pq['tp']} FP={pq['fp']} FN={pq['fn']}) "
                   f"| eval {time.time() - ev_t0:.0f}s")
@@ -228,29 +252,29 @@ def main():
                 torch.save(
                     {
                         "model_state_dict": model.state_dict(),
-                        "encoder": ENCODER,
+                        "encoder": args.encoder,
                         "epoch": epoch,
                         "val_pq": pq["pq"], "val_sq": pq["sq"], "val_rq": pq["rq"],
                         "val_dice": dice,
                         "pp_threshold": PP_THRESHOLD, "pp_min_area": PP_MIN_AREA,
                         "history": history + [row],
                     },
-                    CHECKPOINT_PATH,
+                    checkpoint_path,
                 )
-                print(f"  new best (PQ={best_pq:.4f}) -> saved {CHECKPOINT_PATH}")
+                print(f"  new best (PQ={best_pq:.4f}) -> saved {checkpoint_path}")
         else:
-            print(f"[epoch {epoch}/{EPOCHS}] loss={row['loss']:.4f} time={epoch_time:.1f}s")
+            print(f"[epoch {epoch}/{epochs}] loss={row['loss']:.4f} time={epoch_time:.1f}s")
 
         history.append(row)
 
     # reload the best checkpoint and cache its val probability maps for the sweep
-    print(f"\n=== caching best-checkpoint val probability maps -> {VALPROBS_DIR} ===")
-    ckpt = torch.load(CHECKPOINT_PATH, map_location=device, weights_only=False)
+    print(f"\n=== caching best-checkpoint val probability maps -> {valprobs_dir} ===")
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model_state_dict"])
-    pq, dice = evaluate(model, val_loader, device, save_probs_dir=VALPROBS_DIR)
+    pq, dice = evaluate(model, val_loader, device, save_probs_dir=valprobs_dir)
     print(f"best checkpoint (epoch {ckpt['epoch']}): val PQ={pq['pq']:.4f} "
           f"SQ={pq['sq']:.4f} RQ={pq['rq']:.4f} Dice={dice:.4f}")
-    print(f"cached {len(list(VALPROBS_DIR.glob('*.npy')))} probability maps")
+    print(f"cached {len(list(valprobs_dir.glob('*.npy')))} probability maps")
 
 
 if __name__ == "__main__":
