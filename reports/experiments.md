@@ -22,7 +22,9 @@ Reference points (measured on real data, see plan):
 | 5c | unet_v2 + pp sweep | thr 0.55, min_area 400, closing=True (trimmed 40-config grid) | **0.4095** | — | — | — | — | **Clears fork gate (0.4069) → U-Net is primary architecture.** First submission candidate |
 | 6 | unet_b5 | eff-b5 encoder from scratch, 40 ep (encoder ladder) | 0.3908 | 0.6509 | 0.5782 | 0.6810 | 948/901/439 | **Refuted**: below b3 @ matched budget (0.3966). Capacity isn't the constraint — ladder stopped |
 | 7 | unet_v2 + flip-TTA | 4× flip-averaged probs, pp thr 0.55/400/closing | 0.4193 | 0.6499 | 0.6206 | 0.6788 | 875/551/512 | +0.010; FP 782→551. Keep TTA permanently (~100s val cost) |
-| 8 | unet_consensus | soft mean-of-batches targets, 601 unique imgs, 60 ep | *(running)* | | | | | Gate: ≥ per-entry line → adopt (cleaner + faster epochs) |
+| 8 | unet_consensus | soft mean-of-batches targets, 601 unique imgs, 60 ep | 0.3994 | 0.6535 | 0.5919 | 0.6814 | 939/850/448 | Tie with per-entry (0.4015) — explicit soft target adds nothing over SGD averaging. Keep per-entry |
+| 8b | unet_consensus + TTA | 4-flip, pp 0.55/400/closing | 0.4101 | 0.6502 | 0.6061 | 0.6840 | 883/639/504 | Weaker than v2+TTA (0.4193) |
+| 8c | 2-model ensemble | mean(v2_tta, consensus_tta) maps, thr swept | 0.4139 | — | — | — | — | **Refuted**: weaker partner dilutes stronger model. Ensemble equals only → folds |
 | 9 | TTA-maps pp re-sweep | 40-config grid on flip-averaged maps | 0.4193 | — | — | — | — | Optimum unchanged (thr 0.55 / 400 / closing) — pp config is stable |
 | 10 | hysteresis growing | seed thr 0.55, grow ∈ {0.25…0.50}, no-merge guard | 0.4188 @ best | — | — | — | — | **Refuted**: monotonically worse; growing degrades the 876 TPs more than it recovers the 99 near-misses. Post-processing maxed out |
 

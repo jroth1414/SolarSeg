@@ -144,6 +144,10 @@ def parse_args():
     ap.add_argument("--run-name", default="unet_v1",
                     help="checkpoint saved to checkpoints/<run-name>.pt, prob maps to "
                          "checkpoints/<run-name>_valprobs/")
+    ap.add_argument("--kfold", type=int, default=None,
+                    help="use get_grouped_kfold(k=KFOLD, fold=FOLD) instead of the "
+                         "fixed 0.15 grouped split")
+    ap.add_argument("--fold", type=int, default=0)
     return ap.parse_args()
 
 
@@ -162,8 +166,14 @@ def main():
     torch.manual_seed(SEED)
     np.random.seed(SEED)
 
-    train_ids, val_ids = get_grouped_split(JSON_PATH, val_fraction=VAL_FRACTION, seed=SEED)
-    print(f"grouped split: train={len(train_ids)} val={len(val_ids)}")
+    if args.kfold:
+        from src.data.coco_dataset import get_grouped_kfold
+        train_ids, val_ids = get_grouped_kfold(JSON_PATH, k=args.kfold, fold=args.fold, seed=SEED)
+        print(f"grouped {args.kfold}-fold split (fold {args.fold}): "
+              f"train={len(train_ids)} val={len(val_ids)}")
+    else:
+        train_ids, val_ids = get_grouped_split(JSON_PATH, val_fraction=VAL_FRACTION, seed=SEED)
+        print(f"grouped split: train={len(train_ids)} val={len(val_ids)}")
 
     train_ds = SemanticFilamentDataset(
         JSON_PATH, IMAGES_DIR, image_ids=train_ids, crop_size=CROP_SIZE,

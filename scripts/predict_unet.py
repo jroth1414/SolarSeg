@@ -40,6 +40,8 @@ def main():
     ap.add_argument("--min-area", type=int, default=None, help="override checkpoint pp_min_area")
     ap.add_argument("--min-mean-prob", type=float, default=0.0)
     ap.add_argument("--closing", action="store_true")
+    ap.add_argument("--tta", action="store_true",
+                    help="average probabilities over 4 flip variants (measured +0.010 val PQ)")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -68,10 +70,14 @@ def main():
             with Image.open(path) as im:
                 arr = np.array(im.convert("L"), dtype=np.uint8)
             x = torch.from_numpy(arr).float().div_(255.0)[None, None].to(device)
-            with torch.autocast(device_type=device.type, dtype=torch.float16,
-                                enabled=device.type == "cuda"):
-                logits = model(x)
-            prob = torch.sigmoid(logits.float())[0, 0].cpu().numpy()
+            if args.tta:
+                from scripts.eval_tta import tta_prob
+                prob = tta_prob(model, x, device).cpu().numpy()
+            else:
+                with torch.autocast(device_type=device.type, dtype=torch.float16,
+                                    enabled=device.type == "cuda"):
+                    logits = model(x)
+                prob = torch.sigmoid(logits.float())[0, 0].cpu().numpy()
 
             instances = probs_to_instances(
                 prob, threshold=threshold, min_area=min_area,

@@ -306,6 +306,34 @@ def get_grouped_split(
 # --------------------------------------------------------------------------- #
 
 
+def get_grouped_kfold(json_path, k=5, fold=0, seed=0):
+    """K-fold variant of get_grouped_split with the same anti-leakage grouping:
+    unique file_names are shuffled deterministically and dealt into k folds;
+    entries whose file_name lands in fold `fold` become val_ids, the rest
+    train_ids. Same (k, seed) always yields the same partition, and every
+    images[].id appears in exactly one fold's val set across fold=0..k-1
+    (out-of-fold coverage of the entire training json)."""
+    import json as _json
+    import random as _random
+
+    with open(json_path, encoding="utf-8") as f:
+        images = _json.load(f)["images"]
+
+    by_fname = {}
+    for im in images:
+        by_fname.setdefault(im["file_name"], []).append(im["id"])
+
+    fnames = sorted(by_fname)
+    rng = _random.Random(seed)
+    rng.shuffle(fnames)
+
+    val_fnames = set(fnames[fold::k])
+    train_ids, val_ids = [], []
+    for fname, ids in by_fname.items():
+        (val_ids if fname in val_fnames else train_ids).extend(ids)
+    return train_ids, val_ids
+
+
 def collate_fn(batch):
     """Standard torchvision-detection-style collate: tuple of images, tuple of
     targets. Deliberately does NOT stack into a single tensor -- images in a
