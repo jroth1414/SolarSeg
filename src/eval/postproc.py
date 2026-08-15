@@ -26,6 +26,7 @@ def probs_to_instances(
     min_mean_prob: float = 0.0,
     closing: bool = False,
     non_empty_guard: bool = True,
+    grow_threshold: float | None = None,
 ) -> list[np.ndarray]:
     """Convert one HxW float probability map into a list of HxW uint8 instance masks.
 
@@ -38,6 +39,12 @@ def probs_to_instances(
         closing: apply a 3x3 morphological closing before component extraction
             (seals 1-2px gaps; measured merge risk at that radius ~0.04% of pairs).
         non_empty_guard: emit the largest raw component when filters kill everything.
+        grow_threshold: hysteresis growing -- extend each detected component into
+            the connected region above this LOWER threshold. Components stay
+            separated: a low-threshold region touching two or more detected
+            components leaves them ungrown (no-merge guard). Targets the
+            "found it but drew it too small" error bucket (near-miss IoU 0.4-0.5)
+            without creating new components. None disables.
     """
     binary = (prob > threshold).astype(np.uint8)
     if closing:
@@ -46,15 +53,20 @@ def probs_to_instances(
 
     n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
 
+    if grow_threshold is not None and grow_threshold < threshold:
+        labels = _hysteresis_grow(prob, labels, n_labels, grow_threshold)
+
     instances = []
     largest_label, largest_area = None, 0
     for label in range(1, n_labels):  # 0 is background
-        area = int(stats[label, cv2.CC_STAT_AREA])
+        mask = (labels == label).astype(np.uint8)
+        area = int(mask.sum())
+        if area == 0:
+            continue
         if area > largest_area:
             largest_label, largest_area = label, area
         if area < min_area:
             continue
-        mask = (labels == label).astype(np.uint8)
         if min_mean_prob > 0.0 and float(prob[mask.astype(bool)].mean()) < min_mean_prob:
             continue
         instances.append(mask)
@@ -63,3 +75,24 @@ def probs_to_instances(
         instances.append((labels == largest_label).astype(np.uint8))
 
     return instances
+
+
+def _hysteresis_grow(prob, seed_labels, n_seed_labels, grow_threshold):
+    """Extend each seed component into its connected low-threshold region.
+
+    A low-threshold component containing pixels of exactly ONE seed label grows
+    that seed to the full low component; one containing two or more distinct
+    seed labels leaves them all unchanged (no-merge guard).
+    Returns a new labels array using the original seed label ids.
+    """
+    low_binary = (prob > grow_threshold).astype(np.uint8)
+    n_low, low_labels = cv2.connectedComponents(low_binary, connectivity=8)
+
+    out = seed_labels.copy()
+    for low_label in range(1, n_low):
+        low_mask = low_labels == low_label
+        seeds_here = np.unique(seed_labels[low_mask])
+        seeds_here = seeds_here[seeds_here != 0]
+        if len(seeds_here) == 1:
+            out[low_mask] = seeds_here[0]
+    return out

@@ -23,6 +23,14 @@ Reference points (measured on real data, see plan):
 | 6 | unet_b5 | eff-b5 encoder from scratch, 40 ep (encoder ladder) | 0.3908 | 0.6509 | 0.5782 | 0.6810 | 948/901/439 | **Refuted**: below b3 @ matched budget (0.3966). Capacity isn't the constraint — ladder stopped |
 | 7 | unet_v2 + flip-TTA | 4× flip-averaged probs, pp thr 0.55/400/closing | 0.4193 | 0.6499 | 0.6206 | 0.6788 | 875/551/512 | +0.010; FP 782→551. Keep TTA permanently (~100s val cost) |
 | 8 | unet_consensus | soft mean-of-batches targets, 601 unique imgs, 60 ep | *(running)* | | | | | Gate: ≥ per-entry line → adopt (cleaner + faster epochs) |
+| 9 | TTA-maps pp re-sweep | 40-config grid on flip-averaged maps | 0.4193 | — | — | — | — | Optimum unchanged (thr 0.55 / 400 / closing) — pp config is stable |
+| 10 | hysteresis growing | seed thr 0.55, grow ∈ {0.25…0.50}, no-merge guard | 0.4188 @ best | — | — | — | — | **Refuted**: monotonically worse; growing degrades the 876 TPs more than it recovers the 99 near-misses. Post-processing maxed out |
+
+### Error taxonomy (unet_v2 + TTA, thr 0.55/400/closing) — feeds report rubric
+
+FN side (511): pure_miss 268 (52%), partial_undercover 108 (21%), near_miss 99 (19%, mean best-IoU 0.454), fragmented 36 (7%).
+FP side (551): partial_overcover 284 (52%), hallucinated 253 (46%), merged_pred 14 (3%).
+Conclusions: watershed splitting pointless (3%); fragment-merging marginal (7%); the recoverable mass is boundary-extent calibration, which uniform growing can't fix (see #10) → remaining gains come from better probability maps (consensus targets, folds/ensembling).
 
 ## Notes
 
