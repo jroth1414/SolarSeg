@@ -19,7 +19,10 @@ Reference points (measured on real data, see plan):
 | 4 | unet_v1 | SMP U-Net eff-b3, 1024² fg-biased crops, BCE+Dice, AMP, 40 ep, naive pp (0.5/200) | 0.3966 | 0.6507 | 0.5870 | 0.6798 | 938/856/449 | Beats #3 pre-sweep; val PQ still rising at ep40 → extend |
 | 5 | unet_v2 | warm-restart from #4, +40 ep @ 1e-4 cosine, naive pp | 0.4015 | 0.6491 | 0.5963 | 0.6754 | 928/782/459 | Best @ ep25, then flat — length lever exhausted. Sweep pending |
 | 5b | unet_v1 + pp sweep | thr 0.50, min_area 400, closing=True (294-config grid) | 0.4065 | — | — | — | — | +0.010 over naive; min_mean_prob axis dead; min_area 400 ≫ GT floor 200 → small CCs are FPs |
-| 6 | unet_b5 | eff-b5 encoder from scratch, 40 ep (encoder ladder) | *(running)* | | | | | Gate: +0.01 over b3 line |
+| 5c | unet_v2 + pp sweep | thr 0.55, min_area 400, closing=True (trimmed 40-config grid) | **0.4095** | — | — | — | — | **Clears fork gate (0.4069) → U-Net is primary architecture.** First submission candidate |
+| 6 | unet_b5 | eff-b5 encoder from scratch, 40 ep (encoder ladder) | 0.3908 | 0.6509 | 0.5782 | 0.6810 | 948/901/439 | **Refuted**: below b3 @ matched budget (0.3966). Capacity isn't the constraint — ladder stopped |
+| 7 | unet_v2 + flip-TTA | 4× flip-averaged probs, pp thr 0.55/400/closing | 0.4193 | 0.6499 | 0.6206 | 0.6788 | 875/551/512 | +0.010; FP 782→551. Keep TTA permanently (~100s val cost) |
+| 8 | unet_consensus | soft mean-of-batches targets, 601 unique imgs, 60 ep | *(running)* | | | | | Gate: ≥ per-entry line → adopt (cleaner + faster epochs) |
 
 ## Notes
 

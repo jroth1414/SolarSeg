@@ -75,19 +75,40 @@ class SemanticFilamentDataset(Dataset):
                False -> full-resolution image, no augmentation.
         fg_bias: probability that a training crop is centered near a randomly
                  chosen filament (with jitter) instead of uniformly placed.
+        consensus: collapse entries sharing a file_name into ONE sample whose
+                 target is the MEAN of the per-entry union masks (soft values
+                 in {0, 1/3, 1/2, 2/3, 1}) -- an explicit majority-vote-style
+                 target instead of relying on per-entry binary targets to
+                 average out through SGD. Single-entry images keep binary
+                 targets. Roughly 40% fewer samples per epoch.
     """
 
     def __init__(self, json_path, images_dir, image_ids=None, crop_size=1024,
-                 train=True, fg_bias=0.7):
+                 train=True, fg_bias=0.7, consensus=False):
         self.images_dir = Path(images_dir)
         self.crop_size = crop_size
         self.train = train
         self.fg_bias = fg_bias
+        self.consensus = consensus
 
         entries = load_entries(json_path)
         if image_ids is not None:
             wanted = set(image_ids)
             entries = [e for e in entries if e["id"] in wanted]
+
+        if consensus:
+            groups = {}
+            for e in entries:
+                groups.setdefault(e["file_name"], []).append(e)
+            merged = []
+            for file_name, group in sorted(groups.items()):
+                base = dict(group[0])
+                base["id"] = f"consensus-{file_name.rsplit('.', 1)[0]}"
+                # all member entries' annotations, for fg-biased cropping
+                base["anns"] = [a for e in group for a in e["anns"]]
+                base["member_entries"] = group
+                merged.append(base)
+            entries = merged
         self.entries = entries
 
     def __len__(self):
@@ -115,7 +136,13 @@ class SemanticFilamentDataset(Dataset):
     def __getitem__(self, idx):
         entry = self.entries[idx]
         image = self._load_image(entry)
-        target = rasterize_union_mask(entry)
+        if self.consensus:
+            members = entry["member_entries"]
+            target = np.mean(
+                [rasterize_union_mask(m).astype(np.float32) for m in members], axis=0
+            )
+        else:
+            target = rasterize_union_mask(entry)
 
         if self.train:
             h, w = image.shape

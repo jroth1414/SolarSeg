@@ -136,6 +136,9 @@ def parse_args():
     ap.add_argument("--lr", type=float, default=DEFAULT_LR)
     ap.add_argument("--encoder", default="efficientnet-b3")
     ap.add_argument("--batch-size", type=int, default=4)
+    ap.add_argument("--consensus", action="store_true",
+                    help="train on one sample per unique image with soft mean-of-annotator-batches "
+                         "targets instead of one binary sample per entry (val protocol unchanged)")
     ap.add_argument("--init-from", default=None,
                     help="checkpoint to warm-start weights from (fresh optimizer/cosine cycle)")
     ap.add_argument("--run-name", default="unet_v1",
@@ -164,8 +167,11 @@ def main():
 
     train_ds = SemanticFilamentDataset(
         JSON_PATH, IMAGES_DIR, image_ids=train_ids, crop_size=CROP_SIZE,
-        train=True, fg_bias=FG_BIAS,
+        train=True, fg_bias=FG_BIAS, consensus=args.consensus,
     )
+    if args.consensus:
+        print(f"consensus targets: {len(train_ds)} unique-image samples "
+              f"(from {len(train_ids)} entries)")
     val_ds = SemanticFilamentDataset(JSON_PATH, IMAGES_DIR, image_ids=val_ids, train=False)
     # id -> entry lookup used by evaluate() for instance-level GT
     val_ds.entries_by_id = {e["id"]: e for e in val_ds.entries}
