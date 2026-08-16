@@ -33,6 +33,13 @@ Reference points (measured on real data, see plan):
 
 Final submission candidates: `unet_5fold_tta.csv` (ensemble, primary) and `unet_v2_tta.csv` (single model, 0.4193 fixed-split val).
 
+### Leaderboard calibration (2026-08-16, first uploads)
+
+Both `unet_5fold_tta.csv` (OOF 0.4221) and `unet_v2_tta.csv` (val 0.4193) scored **0.36 public LB** (2-decimal display).
+- Systematic offset: LB ≈ local val − 0.06; ordering preserved → keep optimizing val PQ.
+- 2-decimal LB resolution makes small-delta submission probing blind; only submit val Δ ≥ 0.01.
+- Standings context: leader 0.52 (outlier), then 0.40, dense pack 0.37–0.39; we're just behind the pack.
+
 ### Error taxonomy (unet_v2 + TTA, thr 0.55/400/closing) — feeds report rubric
 
 FN side (511): pure_miss 268 (52%), partial_undercover 108 (21%), near_miss 99 (19%, mean best-IoU 0.454), fragmented 36 (7%).

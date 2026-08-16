@@ -136,6 +136,9 @@ def parse_args():
     ap.add_argument("--lr", type=float, default=DEFAULT_LR)
     ap.add_argument("--encoder", default="efficientnet-b3")
     ap.add_argument("--batch-size", type=int, default=4)
+    ap.add_argument("--crop-size", type=int, default=CROP_SIZE)
+    ap.add_argument("--accum", type=int, default=1,
+                    help="gradient accumulation steps (for large crops at small batch)")
     ap.add_argument("--consensus", action="store_true",
                     help="train on one sample per unique image with soft mean-of-annotator-batches "
                          "targets instead of one binary sample per entry (val protocol unchanged)")
@@ -176,7 +179,7 @@ def main():
         print(f"grouped split: train={len(train_ids)} val={len(val_ids)}")
 
     train_ds = SemanticFilamentDataset(
-        JSON_PATH, IMAGES_DIR, image_ids=train_ids, crop_size=CROP_SIZE,
+        JSON_PATH, IMAGES_DIR, image_ids=train_ids, crop_size=args.crop_size,
         train=True, fg_bias=FG_BIAS, consensus=args.consensus,
     )
     if args.consensus:
@@ -207,7 +210,7 @@ def main():
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=epochs * len(train_loader), eta_min=1e-6
+        optimizer, T_max=max(1, epochs * len(train_loader) // args.accum), eta_min=1e-6
     )
     scaler = torch.amp.GradScaler(enabled=device.type == "cuda")
     bce_fn = torch.nn.BCEWithLogitsLoss()
@@ -223,6 +226,7 @@ def main():
         t0 = time.time()
         loss_sum = bce_sum = dice_sum = 0.0
         n_steps = 0
+        optimizer.zero_grad(set_to_none=True)  # clean accumulation window at epoch start
 
         for step, (images, targets, _ids) in enumerate(train_loader):
             images = images.to(device, non_blocking=True)
@@ -233,11 +237,12 @@ def main():
                 logits = model(images)
                 loss, bce_v, dice_v = bce_dice_loss(logits, targets, bce_fn)
 
-            optimizer.zero_grad(set_to_none=True)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            scheduler.step()
+            scaler.scale(loss / args.accum).backward()
+            if (step + 1) % args.accum == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+                scheduler.step()
 
             loss_sum += float(loss.item())
             bce_sum += bce_v
