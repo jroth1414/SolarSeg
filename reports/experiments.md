@@ -35,7 +35,9 @@ Final submission candidates: `unet_5fold_tta.csv` (ensemble, primary) and `unet_
 
 | 13 | unet_1536 | 1536² crops, bs2+accum2, 60 ep, naive pp | 0.4169 | 0.6491 | 0.6192 | 0.6806 | 906/619/481 | **Gate cleared** (+0.015 vs 1024 naive): SQ flat, RQ +0.023 — resolution helps *detection* of thin filaments. New recipe line |
 | 13b | unet_1536 + TTA @ v2's pp | thr 0.55/400/closing | 0.4144 | 0.6491 | 0.6105 | 0.6786 | 829/479/558 | Below naive! pp operating point is model-specific — re-sweep per model (running) |
-| 14 | unet_mitb2_1536 | SegFormer-family encoder @ 1536 recipe | *(running)* | | | | | Parity gate → multi-arch ensemble slot |
+| 14 | unet_mitb2_1536 | SegFormer-family encoder @ 1536 recipe | — | — | — | — | — | **OOM on 16GB** (attention wants 29GB @ 1536; 2048 inference would need tiling). Family excluded |
+| 14b | unet_1536 + TTA + own pp sweep | thr **0.40** / min_area **300** / closing | **0.4234** | — | — | — | — | New best single model (+0.004 paired vs v2's 0.4193). pp optimum moved 0.55→0.40 vs the 1024 model — re-sweep per model is mandatory |
+| 15 | unet_convnext_1536 | tu-convnext_small @ 1536 recipe (encoder family pivot) | *(running)* | | | | | Parity gate → ensemble slot |
 
 Also: progressive non-empty guard added to postproc (threshold falls back 0.4→0.05 until a component exists; images emitting zero rows are guaranteed PQ=0 and scorer handling of absent images is unknown).
 
