@@ -56,17 +56,24 @@ def probs_to_instances(
     if grow_threshold is not None and grow_threshold < threshold:
         labels = _hysteresis_grow(prob, labels, n_labels, grow_threshold)
 
+    grown = grow_threshold is not None and grow_threshold < threshold
+    if grown:
+        # stats areas are stale after growing -- recount per label
+        areas = np.bincount(labels.ravel(), minlength=n_labels)
+    else:
+        areas = stats[:, cv2.CC_STAT_AREA]
+
     instances = []
     largest_label, largest_area = None, 0
     for label in range(1, n_labels):  # 0 is background
-        mask = (labels == label).astype(np.uint8)
-        area = int(mask.sum())
+        area = int(areas[label])
         if area == 0:
             continue
         if area > largest_area:
             largest_label, largest_area = label, area
         if area < min_area:
-            continue
+            continue  # skip before materializing the full-size mask
+        mask = (labels == label).astype(np.uint8)
         if min_mean_prob > 0.0 and float(prob[mask.astype(bool)].mean()) < min_mean_prob:
             continue
         instances.append(mask)

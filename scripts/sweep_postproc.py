@@ -54,36 +54,34 @@ def main():
 
     entries_by_id = {e["id"]: e for e in load_entries(JSON_PATH)}
 
-    # preload probs (float16 -> float32) and GT instance masks once
-    print("loading probs + rasterizing GT instances (one-time cost)...")
-    data = []
-    for f in prob_files:
-        entry_id = f.stem
-        prob = np.load(f).astype(np.float32)
-        gt = entry_instance_masks(entries_by_id[entry_id])
-        data.append((entry_id, prob, gt))
+    configs = [
+        {"threshold": thr, "min_area": min_area, "closing": closing, "min_mean_prob": mmp}
+        for closing in CLOSINGS
+        for thr in THRESHOLDS
+        for min_area in MIN_AREAS
+        for mmp in MIN_MEAN_PROBS
+    ]
+    print(f"sweeping {len(configs)} configs (streaming one image at a time)")
 
-    print(f"sweeping {len(THRESHOLDS)}x{len(MIN_AREAS)}x{len(CLOSINGS)}x{len(MIN_MEAN_PROBS)} "
-          f"= {len(THRESHOLDS) * len(MIN_AREAS) * len(CLOSINGS) * len(MIN_MEAN_PROBS)} configs")
-    results = []
+    # Stream images (outer loop) rather than preloading all probs + GT masks:
+    # a full preload costs ~8GB RAM at 175 x 2048^2 and OOMs alongside a
+    # concurrent training run. Per-image, all configs are evaluated while its
+    # prob map and GT rasterization are in memory once.
+    per_config_pqs = [[] for _ in configs]
     t0 = time.time()
-    for closing in CLOSINGS:
-        for thr in THRESHOLDS:
-            for min_area in MIN_AREAS:
-                for mmp in MIN_MEAN_PROBS:
-                    pqs = [
-                        compute_panoptic_quality(
-                            gt,
-                            probs_to_instances(prob, threshold=thr, min_area=min_area,
-                                               min_mean_prob=mmp, closing=closing),
-                        )["pq"]
-                        for _id, prob, gt in data
-                    ]
-                    results.append({
-                        "threshold": thr, "min_area": min_area, "closing": closing,
-                        "min_mean_prob": mmp, "pq": float(np.mean(pqs)),
-                    })
-        print(f"  closing={closing} done ({time.time() - t0:.0f}s elapsed)")
+    for n_done, f in enumerate(prob_files, 1):
+        prob = np.load(f).astype(np.float32)
+        gt = entry_instance_masks(entries_by_id[f.stem])
+        for ci, cfg in enumerate(configs):
+            pq = compute_panoptic_quality(
+                gt, probs_to_instances(prob, **cfg))["pq"]
+            per_config_pqs[ci].append(pq)
+        if n_done % 25 == 0 or n_done == len(prob_files):
+            print(f"  {n_done}/{len(prob_files)} images ({time.time() - t0:.0f}s elapsed)")
+
+    results = [
+        {**cfg, "pq": float(np.mean(pqs))} for cfg, pqs in zip(configs, per_config_pqs)
+    ]
 
     results.sort(key=lambda r: -r["pq"])
     print("\n=== TOP 10 CONFIGS ===")
