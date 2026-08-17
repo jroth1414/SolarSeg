@@ -33,6 +33,12 @@ Reference points (measured on real data, see plan):
 
 Final submission candidates: `unet_5fold_tta.csv` (ensemble, primary) and `unet_v2_tta.csv` (single model, 0.4193 fixed-split val).
 
+| 13 | unet_1536 | 1536² crops, bs2+accum2, 60 ep, naive pp | 0.4169 | 0.6491 | 0.6192 | 0.6806 | 906/619/481 | **Gate cleared** (+0.015 vs 1024 naive): SQ flat, RQ +0.023 — resolution helps *detection* of thin filaments. New recipe line |
+| 13b | unet_1536 + TTA @ v2's pp | thr 0.55/400/closing | 0.4144 | 0.6491 | 0.6105 | 0.6786 | 829/479/558 | Below naive! pp operating point is model-specific — re-sweep per model (running) |
+| 14 | unet_mitb2_1536 | SegFormer-family encoder @ 1536 recipe | *(running)* | | | | | Parity gate → multi-arch ensemble slot |
+
+Also: progressive non-empty guard added to postproc (threshold falls back 0.4→0.05 until a component exists; images emitting zero rows are guaranteed PQ=0 and scorer handling of absent images is unknown).
+
 ### Leaderboard calibration (2026-08-16, first uploads)
 
 Both `unet_5fold_tta.csv` (OOF 0.4221) and `unet_v2_tta.csv` (val 0.4193) scored **0.36 public LB** (2-decimal display).

@@ -71,8 +71,25 @@ def probs_to_instances(
             continue
         instances.append(mask)
 
-    if not instances and non_empty_guard and largest_label is not None:
-        instances.append((labels == largest_label).astype(np.uint8))
+    if not instances and non_empty_guard:
+        if largest_label is not None:
+            instances.append((labels == largest_label).astype(np.uint8))
+        else:
+            # Nothing crossed `threshold` anywhere in the image. Progressively
+            # lower the threshold until some component appears and emit the
+            # largest one: an image with zero rows is a guaranteed PQ=0 (every
+            # train image has >=1 filament) and the public scorer's handling of
+            # absent images is unknown -- one best-guess mask strictly
+            # dominates none.
+            for fallback_thr in (0.4, 0.3, 0.2, 0.1, 0.05):
+                if fallback_thr >= threshold:
+                    continue
+                fb = (prob > fallback_thr).astype(np.uint8)
+                n_fb, fb_labels, fb_stats, _ = cv2.connectedComponentsWithStats(fb, connectivity=8)
+                if n_fb > 1:
+                    biggest = 1 + int(np.argmax(fb_stats[1:, cv2.CC_STAT_AREA]))
+                    instances.append((fb_labels == biggest).astype(np.uint8))
+                    break
 
     return instances
 
