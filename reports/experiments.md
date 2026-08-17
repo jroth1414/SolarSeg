@@ -37,7 +37,8 @@ Final submission candidates: `unet_5fold_tta.csv` (ensemble, primary) and `unet_
 | 13b | unet_1536 + TTA @ v2's pp | thr 0.55/400/closing | 0.4144 | 0.6491 | 0.6105 | 0.6786 | 829/479/558 | Below naive! pp operating point is model-specific — re-sweep per model (running) |
 | 14 | unet_mitb2_1536 | SegFormer-family encoder @ 1536 recipe | — | — | — | — | — | **OOM on 16GB** (attention wants 29GB @ 1536; 2048 inference would need tiling). Family excluded |
 | 14b | unet_1536 + TTA + own pp sweep | thr **0.40** / min_area **300** / closing | **0.4234** | — | — | — | — | New best single model (+0.004 paired vs v2's 0.4193). pp optimum moved 0.55→0.40 vs the 1024 model — re-sweep per model is mandatory |
-| 15 | unet_convnext_1536 | tu-convnext_small @ 1536 recipe (encoder family pivot) | *(running)* | | | | | Parity gate → ensemble slot |
+| 15 | unet_convnext_1536 | tu-convnext_small @ 1536 recipe (encoder family pivot) | 0.3984 | 0.6479 | 0.5913 | 0.6893 | 902/805/485 | **Refuted** (−0.019 vs b3@1536): with b5, confirms encoder isn't the constraint. No multi-arch ensemble |
+| 16 | 5-fold @ 1536 (unet1536_f0..f4) | 45 ep/fold (1536 line peaked @ ep40) | *(running)* | | | | | Next submission: fold ensemble on the 1536 recipe |
 
 Also: progressive non-empty guard added to postproc (threshold falls back 0.4→0.05 until a component exists; images emitting zero rows are guaranteed PQ=0 and scorer handling of absent images is unknown).
 
