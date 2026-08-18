@@ -43,6 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = REPO_ROOT / "data" / "MAGFiLO_1.0_Kaggle_2026"
 JSON_PATH = DATA_ROOT / "train" / "MAGFiLO_1.0_Annotations_kaggle2026_train.json"
 IMAGES_DIR = DATA_ROOT / "train" / "train_images"
+TEST_IMAGES_DIR = DATA_ROOT / "test" / "test_images"
 
 SEED = 0
 VAL_FRACTION = 0.15
@@ -130,6 +131,28 @@ def entry_instance_masks(entry):
     return out
 
 
+def maybe_add_pseudo(train_ds, args):
+    """Concatenate pseudo-labeled test images onto the train dataset.
+
+    No-op (returns train_ds unchanged) unless --pseudo-dir is set. Affects the
+    train loader only; the val split/protocol never sees pseudo samples.
+    """
+    if not args.pseudo_dir:
+        return train_ds
+    from torch.utils.data import ConcatDataset
+
+    from src.data.pseudo_dataset import PseudoLabelDataset
+
+    pseudo_ds = PseudoLabelDataset(
+        TEST_IMAGES_DIR, args.pseudo_dir, crop_size=args.crop_size,
+        fg_bias=FG_BIAS, soft=True,
+    )
+    combined = ConcatDataset([train_ds, pseudo_ds])
+    print(f"pseudo-labels: +{len(pseudo_ds)} soft-target test-image samples from "
+          f"{args.pseudo_dir} (train set {len(train_ds)} -> {len(combined)})")
+    return combined
+
+
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
@@ -157,7 +180,25 @@ def parse_args():
                     help="use get_grouped_kfold(k=KFOLD, fold=FOLD) instead of the "
                          "fixed 0.15 grouped split")
     ap.add_argument("--fold", type=int, default=0)
-    return ap.parse_args()
+    ap.add_argument("--pseudo-dir", default=None,
+                    help="directory of <stem>.npy pseudo-label probability maps for the "
+                         "test images (from scripts/make_pseudo_labels.py); when set, "
+                         "pseudo-labeled test images are concatenated onto the TRAIN "
+                         "loader as soft-target samples (val split/protocol unchanged)")
+    ap.add_argument("--pseudo-weight", type=float, default=1.0,
+                    help="loss weight for pseudo samples; only 1.0 is implemented")
+    args = ap.parse_args()
+    if args.spine_aux and args.pseudo_dir:
+        # pseudo prob maps are single-channel -- there is no spine target to
+        # supervise channel 1 with, so refuse the combination outright
+        ap.error("--spine-aux and --pseudo-dir are unsupported together "
+                 "(pseudo-label prob maps have no spine channel)")
+    if args.pseudo_weight != 1.0:
+        # Per-sample loss weighting is not wired into the training loop; the
+        # flag exists so the CLI stays stable once it is. Only 1.0 (pseudo
+        # samples weighted like real ones) is supported for now.
+        raise NotImplementedError("--pseudo-weight != 1.0 is not implemented")
+    return args
 
 
 def main():
@@ -195,6 +236,7 @@ def main():
     # id -> entry lookup used by evaluate() for instance-level GT
     val_ds.entries_by_id = {e["id"]: e for e in val_ds.entries}
 
+    train_ds = maybe_add_pseudo(train_ds, args)
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True, num_workers=NUM_WORKERS,
         collate_fn=semantic_collate, pin_memory=True,
