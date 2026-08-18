@@ -77,7 +77,8 @@ def main():
     print(f"device: {device} | checkpoint: {args.checkpoint} (val_pq {ckpt['val_pq']:.4f}) | "
           f"pp: thr={threshold} min_area={min_area} closing={args.closing}")
 
-    model = build_unet(encoder_name=ckpt["encoder"], encoder_weights=None).to(device)
+    model = build_unet(encoder_name=ckpt["encoder"], encoder_weights=None,
+                       classes=ckpt.get("classes", 1)).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
 

@@ -48,7 +48,8 @@ def main():
     models = []
     for path in args.checkpoints:
         ckpt = torch.load(path, map_location=device, weights_only=False)
-        m = build_unet(encoder_name=ckpt["encoder"], encoder_weights=None).to(device)
+        m = build_unet(encoder_name=ckpt["encoder"], encoder_weights=None,
+                       classes=ckpt.get("classes", 1)).to(device)
         m.load_state_dict(ckpt["model_state_dict"])
         m.eval()
         models.append(m)

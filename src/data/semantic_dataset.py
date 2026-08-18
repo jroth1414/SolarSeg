@@ -25,6 +25,7 @@ import json
 import random
 from pathlib import Path
 
+import cv2
 import numpy as np
 import torch
 from PIL import Image
@@ -64,6 +65,25 @@ def rasterize_union_mask(entry) -> np.ndarray:
     return maskUtils.decode(maskUtils.merge(rles)).astype(np.uint8)
 
 
+def rasterize_spine_mask(entry, thickness=5) -> np.ndarray:
+    """Union of all the entry's spine polylines as one HxW uint8 {0,1} mask.
+
+    Spines are the annotated centerline polylines ([x0,y0,x1,y1,...], median
+    10 points); drawn with a small thickness so the auxiliary channel has
+    enough foreground support for BCE supervision.
+    """
+    h, w = entry["height"], entry["width"]
+    mask = np.zeros((h, w), dtype=np.uint8)
+    polylines = [
+        np.round(np.asarray(ann["spine"], dtype=np.float64).reshape(-1, 2)).astype(np.int32)
+        for ann in entry["anns"]
+        if ann.get("spine") and len(ann["spine"]) >= 4  # need >= 2 points to draw
+    ]
+    if polylines:
+        cv2.polylines(mask, polylines, isClosed=False, color=1, thickness=thickness)
+    return mask
+
+
 class SemanticFilamentDataset(Dataset):
     """See module docstring.
 
@@ -81,15 +101,21 @@ class SemanticFilamentDataset(Dataset):
                  target instead of relying on per-entry binary targets to
                  average out through SGD. Single-entry images keep binary
                  targets. Roughly 40% fewer samples per epoch.
+        spine_aux: add a second target channel with all annotations' spine
+                 polylines rasterized (thickness-5 lines, binary) as a
+                 deep-supervision target for centerline continuity. Targets
+                 become (2, H, W); channel 0 is unchanged. In consensus mode
+                 the spine channel is the UNION of member entries' spines.
     """
 
     def __init__(self, json_path, images_dir, image_ids=None, crop_size=1024,
-                 train=True, fg_bias=0.7, consensus=False):
+                 train=True, fg_bias=0.7, consensus=False, spine_aux=False):
         self.images_dir = Path(images_dir)
         self.crop_size = crop_size
         self.train = train
         self.fg_bias = fg_bias
         self.consensus = consensus
+        self.spine_aux = spine_aux
 
         entries = load_entries(json_path)
         if image_ids is not None:
@@ -144,6 +170,17 @@ class SemanticFilamentDataset(Dataset):
         else:
             target = rasterize_union_mask(entry)
 
+        if self.spine_aux:
+            # Stack the spine channel along a TRAILING axis: the crop slicing,
+            # flips and rot90 below all act on the first two (spatial) axes, so
+            # both channels go through identical transforms and stay
+            # pixel-aligned. In consensus mode entry["anns"] already holds all
+            # member entries' annotations, so this is the union of their spines.
+            spine = rasterize_spine_mask(entry)
+            target = np.stack(
+                [target.astype(np.float32), spine.astype(np.float32)], axis=-1
+            )
+
         if self.train:
             h, w = image.shape
             y0, x0 = self._crop_coords(entry, h, w)
@@ -161,7 +198,12 @@ class SemanticFilamentDataset(Dataset):
                 image, target = np.rot90(image, k), np.rot90(target, k)
 
         image_t = torch.from_numpy(np.ascontiguousarray(image)).float().div_(255.0).unsqueeze(0)
-        target_t = torch.from_numpy(np.ascontiguousarray(target)).float().unsqueeze(0)
+        if self.spine_aux:
+            target_t = torch.from_numpy(
+                np.ascontiguousarray(np.transpose(target, (2, 0, 1)))
+            ).float()
+        else:
+            target_t = torch.from_numpy(np.ascontiguousarray(target)).float().unsqueeze(0)
         return image_t, target_t, entry["id"]
 
 

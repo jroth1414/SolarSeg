@@ -142,6 +142,12 @@ def parse_args():
     ap.add_argument("--consensus", action="store_true",
                     help="train on one sample per unique image with soft mean-of-annotator-batches "
                          "targets instead of one binary sample per entry (val protocol unchanged)")
+    ap.add_argument("--spine-aux", action="store_true",
+                    help="add a 2nd output channel supervised on rasterized spine polylines "
+                         "(deep supervision for centerline continuity); val scoring and prob-map "
+                         "caching still use channel 0 only")
+    ap.add_argument("--spine-weight", type=float, default=0.4,
+                    help="weight of the spine-channel BCE loss term when --spine-aux is set")
     ap.add_argument("--init-from", default=None,
                     help="checkpoint to warm-start weights from (fresh optimizer/cosine cycle)")
     ap.add_argument("--run-name", default="unet_v1",
@@ -180,7 +186,7 @@ def main():
 
     train_ds = SemanticFilamentDataset(
         JSON_PATH, IMAGES_DIR, image_ids=train_ids, crop_size=args.crop_size,
-        train=True, fg_bias=FG_BIAS, consensus=args.consensus,
+        train=True, fg_bias=FG_BIAS, consensus=args.consensus, spine_aux=args.spine_aux,
     )
     if args.consensus:
         print(f"consensus targets: {len(train_ds)} unique-image samples "
@@ -198,9 +204,11 @@ def main():
         val_ds, batch_size=1, shuffle=False, num_workers=0, collate_fn=semantic_collate,
     )
 
-    model = build_unet(encoder_name=args.encoder).to(device)
+    n_classes = 2 if args.spine_aux else 1
+    model = build_unet(encoder_name=args.encoder, classes=n_classes).to(device)
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"model: U-Net {args.encoder}, {n_params / 1e6:.1f}M params")
+    print(f"model: U-Net {args.encoder}, {n_params / 1e6:.1f}M params"
+          + (f", classes=2 (spine aux, weight {args.spine_weight})" if args.spine_aux else ""))
 
     if args.init_from:
         init_ckpt = torch.load(args.init_from, map_location=device, weights_only=False)
@@ -224,7 +232,7 @@ def main():
     for epoch in range(1, epochs + 1):
         model.train()
         t0 = time.time()
-        loss_sum = bce_sum = dice_sum = 0.0
+        loss_sum = bce_sum = dice_sum = spine_sum = 0.0
         n_steps = 0
         optimizer.zero_grad(set_to_none=True)  # clean accumulation window at epoch start
 
@@ -235,7 +243,16 @@ def main():
             with torch.autocast(device_type=device.type, dtype=torch.float16,
                                 enabled=device.type == "cuda"):
                 logits = model(images)
-                loss, bce_v, dice_v = bce_dice_loss(logits, targets, bce_fn)
+                if args.spine_aux:
+                    # channel 0: the usual BCE+Dice on the union-mask target;
+                    # channel 1: plain BCE on the rasterized-spine target
+                    loss, bce_v, dice_v = bce_dice_loss(logits[:, :1], targets[:, :1], bce_fn)
+                    spine_bce = bce_fn(logits[:, 1:], targets[:, 1:])
+                    loss = loss + args.spine_weight * spine_bce
+                    spine_v = float(spine_bce.item())
+                else:
+                    loss, bce_v, dice_v = bce_dice_loss(logits, targets, bce_fn)
+                    spine_v = 0.0
 
             scaler.scale(loss / args.accum).backward()
             if (step + 1) % args.accum == 0:
@@ -247,16 +264,20 @@ def main():
             loss_sum += float(loss.item())
             bce_sum += bce_v
             dice_sum += dice_v
+            spine_sum += spine_v
             n_steps += 1
 
             if (step + 1) % LOG_EVERY == 0 or (step + 1) == len(train_loader):
+                spine_str = (f" spine_bce={spine_sum / n_steps:.4f}" if args.spine_aux else "")
                 print(f"  epoch {epoch} step {step + 1}/{len(train_loader)} "
                       f"loss={loss_sum / n_steps:.4f} (bce={bce_sum / n_steps:.4f} "
-                      f"dice={dice_sum / n_steps:.4f}) elapsed={time.time() - t0:.1f}s")
+                      f"dice={dice_sum / n_steps:.4f}{spine_str}) elapsed={time.time() - t0:.1f}s")
 
         epoch_time = time.time() - t0
         row = {"epoch": epoch, "loss": loss_sum / n_steps, "bce": bce_sum / n_steps,
                "dice_loss": dice_sum / n_steps, "epoch_time_s": epoch_time}
+        if args.spine_aux:
+            row["spine_bce"] = spine_sum / n_steps
 
         if epoch % EVAL_EVERY == 0 or epoch == epochs:
             ev_t0 = time.time()
@@ -274,6 +295,9 @@ def main():
                     {
                         "model_state_dict": model.state_dict(),
                         "encoder": args.encoder,
+                        "classes": n_classes,
+                        "spine_aux": args.spine_aux,
+                        "spine_weight": args.spine_weight if args.spine_aux else None,
                         "epoch": epoch,
                         "val_pq": pq["pq"], "val_sq": pq["sq"], "val_rq": pq["rq"],
                         "val_dice": dice,

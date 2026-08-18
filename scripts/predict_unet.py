@@ -55,7 +55,8 @@ def main():
     print(f"post-processing: threshold={threshold} min_area={min_area} "
           f"min_mean_prob={args.min_mean_prob} closing={args.closing}")
 
-    model = build_unet(encoder_name=ckpt["encoder"], encoder_weights=None).to(device)
+    model = build_unet(encoder_name=ckpt["encoder"], encoder_weights=None,
+                       classes=ckpt.get("classes", 1)).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
 
