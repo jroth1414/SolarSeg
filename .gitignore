@@ -2,6 +2,9 @@
 data/MAGFiLO_1.0_Kaggle_2026/
 data/*.zip
 
+# Generated pseudo-label probability maps (~1.4GB, regenerate via scripts/make_pseudo_labels.py)
+data/pseudo_labels/probs/
+
 # Generated submissions / model artifacts
 submissions/*.csv
 checkpoints/

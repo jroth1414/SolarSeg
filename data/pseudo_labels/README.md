@@ -1,0 +1,1 @@
+Model-generated pseudo-labels for the unlabeled test images (mean sigmoid probability over an ensemble of fold checkpoints x 4-flip TTA, see scripts/make_pseudo_labels.py) -- no ground truth involved.
