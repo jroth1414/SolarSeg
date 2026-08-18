@@ -41,6 +41,7 @@ Final submission candidates: `unet_5fold_tta.csv` (ensemble, primary) and `unet_
 | 16 | 5-fold @ 1536 (unet1536_f0..f4) | 45 ep/fold; per-fold TTA PQ 0.4008–0.4275; OOF swept best 0.4200 @ 0.55/400 | 0.4200 | — | — | — | — | **OOF tie with 1024 line (0.4221)** — fixed-split resolution gain didn't replicate across folds |
 | 17 | 2-line OOF ensemble | mean(1024-fold, 1536-fold) per entry, same partition | 0.4233 | — | — | — | — | +0.001 over 1024 line alone — no submission (< 0.01 discipline). **Recipe family exhausted**; remaining levers: spine-aux, pseudo-labeling, domain SSL reserve |
 | 18 | unet_spineaux(+2) | 2-ch head, spine BCE weight 0.4, ~75 effective ep | 0.4011 | 0.6505 | 0.5935 | 0.6762 | 931/800/456 | **Refuted both gates**: PQ tie with 0.4015 line; fragmentation unchanged (40 vs 38), hallucinations slightly worse (310 vs 268). Spine channel adds nothing the mask target doesn't already teach |
+| 19 | unet_pseudo | +180 test imgs w/ 10-model×4-flip soft pseudo-labels, 60 ep | 0.4145 | 0.6561 | 0.6108 | 0.6883 | 948/768/439 | **GATE CLEARED** (+0.013 naive vs 0.4015; best SQ/Dice yet; still rising @ ep60 → extending). TTA: 0.4207 pre-sweep |
 
 Also: progressive non-empty guard added to postproc (threshold falls back 0.4→0.05 until a component exists; images emitting zero rows are guaranteed PQ=0 and scorer handling of absent images is unknown).
 
