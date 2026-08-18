@@ -44,7 +44,10 @@ Final submission candidates: `unet_5fold_tta.csv` (ensemble, primary) and `unet_
 | 19 | unet_pseudo | +180 test imgs w/ 10-model×4-flip soft pseudo-labels, 60 ep | 0.4145 | 0.6561 | 0.6108 | 0.6883 | 948/768/439 | **GATE CLEARED** (+0.013 naive vs 0.4015; best SQ/Dice yet; still rising @ ep60 → extending). TTA: 0.4207 pre-sweep |
 | 19b | unet_pseudo + TTA + sweep | thr 0.45 / min_area 300 / closing | 0.4224 | — | — | — | — | +0.003 over plain line post-TTA (naive gain partly absorbed by TTA+sweep); ≈ single-1536 (0.4234) |
 | 19c | unet_pseudo2 (extension) | +30 ep warm-restart | 0.4135 | — | — | — | — | Did not beat ep-60 original (0.4145) — pseudo line peaked; original checkpoint stands |
-| 20 | 5-fold pseudo rebuild (unetps_f0..f4) | 60 ep/fold with pseudo-labels | *(running)* | | | | | Ensemble submission candidate; may bridge LB 0.36 → 0.37+ pack |
+| 20 | 5-fold pseudo rebuild (unetps_f0..f4) | 60 ep/fold with pseudo-labels; per-fold TTA 0.4011–0.4261 | 0.4216 | — | — | — | — | OOF-swept: tie with plain line (0.4221) — per-fold gains didn't survive aggregation |
+| 21 | 3-line OOF ensemble | mean over {1024, 1536, pseudo} fold maps | **0.4246** | — | — | — | — | Best OOF of the program. Submitted as unet_15model_tta.csv (1299 rows; 15 models × 4 flips, 613s test inference) |
+
+**Program convergence:** every lever past TTA landed within ±0.005 at ensemble level. Local ceiling with this approach ≈ 0.42–0.425 OOF. Remaining strategic option: domain-SSL pretraining on external GONG archive. Efficiency note for report: single-model+TTA (~1 min test inference, PQ 0.4224) vs 15-model (~10 min, 0.4246).
 
 Also: progressive non-empty guard added to postproc (threshold falls back 0.4→0.05 until a component exists; images emitting zero rows are guaranteed PQ=0 and scorer handling of absent images is unknown).
 
